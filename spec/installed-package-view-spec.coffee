@@ -5,8 +5,6 @@ SettingsView = require '../lib/settings-view'
 PackageKeymapView = require '../lib/package-keymap-view'
 PackageSnippetsView = require '../lib/package-snippets-view'
 _ = require 'underscore-plus'
-SnippetsProvider =
-  getSnippets: -> atom.config.scopedSettingsStore.propertySets
 
 describe "InstalledPackageView", ->
   beforeEach ->
@@ -14,13 +12,18 @@ describe "InstalledPackageView", ->
 
   it "displays the grammars registered by the package", ->
     settingsPanels = null
+    snippetservice = null
 
     waitsForPromise ->
       atom.packages.activatePackage(path.join(__dirname, 'fixtures', 'language-test'))
 
+    waitsForPromise ->
+      atom.packages.activatePackage('snippets').then (pack) ->
+        snippetsService = pack.mainModule.snippets()
+
     runs ->
       pack = atom.packages.getActivePackage('language-test')
-      view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), SnippetsProvider)
+      view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), snippetsService)
       settingsPanels = view.element.querySelectorAll('.package-grammars .settings-panel')
 
       waitsFor ->
@@ -38,7 +41,7 @@ describe "InstalledPackageView", ->
 
   it "displays the snippets registered by the package", ->
     snippetsTable = null
-    snippetsModule = null
+    snippetservice = null
 
     # Relies on behavior not present in the snippets package before 1.33.
     # TODO: These tests should always run once 1.33 is released.
@@ -48,18 +51,12 @@ describe "InstalledPackageView", ->
       atom.packages.activatePackage(path.join(__dirname, 'fixtures', 'language-test'))
 
     waitsForPromise ->
-      atom.packages.activatePackage('snippets').then (p) ->
-        snippetsModule = p.mainModule
-        return unless snippetsModule.snippets().snippetsByPackage?
-
-        SnippetsProvider =
-          getSnippets: -> snippetsModule.provideSnippets().getUnparsedSnippets()
-
-    waitsFor 'snippets to load', -> snippetsModule.provideSnippets().bundledSnippetsLoaded()
+      atom.packages.activatePackage('snippets').then (pack) ->
+        snippetsService = pack.mainModule.snippets()
 
     runs ->
       pack = atom.packages.getActivePackage('language-test')
-      view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), SnippetsProvider)
+      view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), snippetsService)
       snippetsTable = view.element.querySelector('.package-snippets-table tbody')
 
     waitsFor 'snippets table children to contain 2 items', ->
@@ -79,24 +76,18 @@ describe "InstalledPackageView", ->
       tooltipCalls = []
       view = null
       snippetsTable = null
-      snippetsModule = null
+      snippetsService = null
 
       waitsForPromise ->
         atom.packages.activatePackage(path.join(__dirname, 'fixtures', 'language-test'))
 
       waitsForPromise ->
-        atom.packages.activatePackage('snippets').then (p) ->
-          snippetsModule = p.mainModule
-          return unless snippetsModule.provideSnippets().getUnparsedSnippets?
-
-          SnippetsProvider =
-            getSnippets: -> snippetsModule.provideSnippets().getUnparsedSnippets()
-
-      waitsFor 'snippets to load', -> snippetsModule.provideSnippets().bundledSnippetsLoaded()
+        atom.packages.activatePackage('snippets').then (pack) ->
+          snippetsService = pack.mainModule.snippets()
 
       runs ->
         pack = atom.packages.getActivePackage('language-test')
-        view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), SnippetsProvider)
+        view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), snippetsService)
         snippetsTable = view.element.querySelector('.package-snippets-table tbody')
 
       waitsFor 'snippets table children to contain 2 items', ->
@@ -115,26 +106,19 @@ describe "InstalledPackageView", ->
     describe "when a snippet is copied", ->
       [pack, card] = []
       snippetsTable = null
-      snippetsModule = null
+      snippetsService = null
 
       beforeEach ->
         waitsForPromise ->
           atom.packages.activatePackage(path.join(__dirname, 'fixtures', 'language-test'))
 
         waitsForPromise ->
-          atom.packages.activatePackage('snippets').then (p) ->
-            snippetsModule = p.mainModule
-            return unless snippetsModule.provideSnippets().getUnparsedSnippets?
-
-            SnippetsProvider =
-              getSnippets: -> snippetsModule.provideSnippets().getUnparsedSnippets()
-              getUserSnippetsPath: snippetsModule.getUserSnippetsPath()
-
-        waitsFor 'snippets to load', -> snippetsModule.provideSnippets().bundledSnippetsLoaded()
+          atom.packages.activatePackage('snippets').then (pack) ->
+            snippetsService = pack.mainModule.snippets()
 
         runs ->
           pack = atom.packages.getActivePackage('language-test')
-          card = new PackageSnippetsView(pack, SnippetsProvider)
+          card = new PackageSnippetsView(pack, snippetsService)
           snippetsTable = card.element.querySelector('.package-snippets-table tbody')
 
         waitsFor 'snippets table children to contain 2 items', ->
@@ -142,7 +126,7 @@ describe "InstalledPackageView", ->
 
       describe "when the snippets file ends in .cson", ->
         it "writes a CSON snippet to the clipboard", ->
-          spyOn(SnippetsProvider, 'getUserSnippetsPath').andReturn('snippets.cson')
+          spyOn(snippetsService, 'userSnippetsPath').andReturn('snippets.cson')
           card.element.querySelector('.package-snippets-table tbody tr:nth-child(1) td.snippet-body .snippet-copy-btn').click()
           expect(atom.clipboard.read()).toBe """
             \n'.b.source':
@@ -153,7 +137,7 @@ describe "InstalledPackageView", ->
 
       describe "when the snippets file ends in .json", ->
         it "writes a JSON snippet to the clipboard", ->
-          spyOn(SnippetsProvider, 'getUserSnippetsPath').andReturn('snippets.json')
+          spyOn(snippetsService, 'userSnippetsPath').andReturn('snippets.json')
           card.element.querySelector('.package-snippets-table tbody tr:nth-child(1) td.snippet-body .btn:nth-child(2)').click()
           expect(atom.clipboard.read()).toBe """
             \n  ".b.source": {
@@ -167,24 +151,20 @@ describe "InstalledPackageView", ->
   describe "when the snippets toggle is clicked", ->
     it "sets the packagesWithSnippetsDisabled config to include the package name", ->
       [pack, card] = []
-      snippetsModule = []
+      snippetsService = []
 
       waitsForPromise ->
         atom.packages.activatePackage(path.join(__dirname, 'fixtures', 'language-test'))
 
       waitsForPromise ->
-        atom.packages.activatePackage('snippets').then (p) ->
-          snippetsModule = p.mainModule
-          return unless snippetsModule.provideSnippets().getUnparsedSnippets?
-
-          SnippetsProvider =
-            getSnippets: -> snippetsModule.provideSnippets().getUnparsedSnippets()
+        atom.packages.activatePackage('snippets').then (pack) ->
+          snippetsService = pack.mainModule.snippets()
 
       waitsFor 'snippets to load', -> snippetsModule.provideSnippets().bundledSnippetsLoaded()
 
       runs ->
         pack = atom.packages.getActivePackage('language-test')
-        card = new PackageSnippetsView(pack, SnippetsProvider)
+        card = new PackageSnippetsView(pack, snippetsService)
         jasmine.attachToDOM(card.element)
 
         card.refs.snippetToggle.click()
@@ -204,13 +184,18 @@ describe "InstalledPackageView", ->
 
   it "does not display keybindings from other platforms", ->
     keybindingsTable = null
+    snippetsService = null
 
     waitsForPromise ->
       atom.packages.activatePackage(path.join(__dirname, 'fixtures', 'language-test'))
 
+    waitsForPromise ->
+      atom.packages.activatePackage('snippets').then (pack) ->
+        snippetsService = pack.mainModule.snippets()
+
     runs ->
       pack = atom.packages.getActivePackage('language-test')
-      view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), SnippetsProvider)
+      view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), snippetsService)
       keybindingsTable = view.element.querySelector('.package-keymap-table tbody')
       expect(keybindingsTable.children.length).toBe 1
 
@@ -273,14 +258,19 @@ describe "InstalledPackageView", ->
   describe "when the package is active", ->
     it "displays the correct enablement state", ->
       packageCard = null
+      snippetsService = null
 
       waitsForPromise ->
         atom.packages.activatePackage('status-bar')
 
+      waitsForPromise ->
+        atom.packages.activatePackage('snippets').then (pack) ->
+          snippetsService = pack.mainModule.snippets()
+
       runs ->
         expect(atom.packages.isPackageActive('status-bar')).toBe(true)
         pack = atom.packages.getLoadedPackage('status-bar')
-        view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), SnippetsProvider)
+        view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), snippetsService)
         packageCard = view.element.querySelector('.package-card')
 
       runs ->
@@ -293,10 +283,16 @@ describe "InstalledPackageView", ->
 
   describe "when the package is not active", ->
     it "displays the correct enablement state", ->
+      snippetsService = null
+
+      waitsForPromise ->
+        atom.packages.activatePackage('snippets').then (pack) ->
+          snippetsService = pack.mainModule.snippets()
+
       atom.packages.loadPackage('status-bar')
       expect(atom.packages.isPackageActive('status-bar')).toBe(false)
       pack = atom.packages.getLoadedPackage('status-bar')
-      view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), SnippetsProvider)
+      view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), snippetsService)
       packageCard = view.element.querySelector('.package-card')
 
       # Trigger observeDisabledPackages() here
@@ -307,6 +303,12 @@ describe "InstalledPackageView", ->
       expect(packageCard.classList.contains('disabled')).toBe(true)
 
     it "still loads the config schema for the package", ->
+      snippetsService = null
+
+      waitsForPromise ->
+        atom.packages.activatePackage('snippets').then (pack) ->
+          snippetsService = pack.mainModule.snippets()
+
       atom.packages.loadPackage(path.join(__dirname, 'fixtures', 'package-with-config'))
 
       waitsFor ->
@@ -316,7 +318,7 @@ describe "InstalledPackageView", ->
         expect(atom.config.get('package-with-config.setting')).toBe undefined
 
         pack = atom.packages.getLoadedPackage('package-with-config')
-        new PackageDetailView(pack, new SettingsView(), new PackageManager(), SnippetsProvider)
+        new PackageDetailView(pack, new SettingsView(), new PackageManager(), snippetsService)
 
         expect(atom.config.get('package-with-config.setting')).toBe 'something'
 
@@ -324,6 +326,12 @@ describe "InstalledPackageView", ->
     normalizePackageDataReadmeError = 'ERROR: No README data found!'
 
     it "still displays the Readme", ->
+      snippetsService = null
+
+      waitsForPromise ->
+        atom.packages.activatePackage('snippets').then (pack) ->
+          snippetsService = pack.mainModule.snippets()
+
       atom.packages.loadPackage(path.join(__dirname, 'fixtures', 'package-with-readme'))
 
       waitsFor ->
@@ -333,6 +341,6 @@ describe "InstalledPackageView", ->
         pack = atom.packages.getLoadedPackage('package-with-readme')
         expect(pack.metadata.readme).toBe normalizePackageDataReadmeError
 
-        view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), SnippetsProvider)
+        view = new PackageDetailView(pack, new SettingsView(), new PackageManager(), snippetsService)
         expect(view.refs.sections.querySelector('.package-readme').textContent).not.toBe normalizePackageDataReadmeError
         expect(view.refs.sections.querySelector('.package-readme').textContent.trim()).toContain 'I am a Readme!'
