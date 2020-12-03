@@ -50,7 +50,7 @@ describe "InstalledPackageView", ->
     waitsForPromise ->
       atom.packages.activatePackage('snippets').then (p) ->
         snippetsModule = p.mainModule
-        return unless snippetsModule.provideSnippets().getUnparsedSnippets?
+        return unless snippetsModule.snippets().snippetsByPackage?
 
         SnippetsProvider =
           getSnippets: -> snippetsModule.provideSnippets().getUnparsedSnippets()
